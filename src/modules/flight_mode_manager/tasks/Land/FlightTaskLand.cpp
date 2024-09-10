@@ -44,7 +44,6 @@ FlightTaskLand::activate(const trajectory_setpoint_s &last_setpoint)
 	Vector3f vel_prev{last_setpoint.velocity};
 	Vector3f pos_prev{last_setpoint.position};
 	Vector3f accel_prev{last_setpoint.acceleration};
-	float yaw_prev = last_setpoint.yawspeed;
 
 	for (int i = 0; i < 3; i++) {
 		// If the position setpoint is unknown, set to the current position
@@ -56,70 +55,143 @@ FlightTaskLand::activate(const trajectory_setpoint_s &last_setpoint)
 		// If no acceleration estimate available, set to zero if the setpoint is NAN
 		if (!PX4_ISFINITE(accel_prev(i))) { accel_prev(i) = 0.f; }
 
-		// If the yaw setpoint is unknown, set to the current yawq
-		if (!PX4_ISFINITE(yaw_prev)) { yaw_prev = _yaw; }
+
 	}
 
+	_yaw_setpoint  = _land_heading = _yaw; // set the yaw setpoint to the current yaw
 	_position_smoothing.reset(pos_prev, vel_prev, accel_prev);
-	_yaw_setpoint = yaw_prev;
+
+
+	_acceleration_setpoint = accel_prev;
+	_velocity_setpoint = vel_prev;
+	_position_setpoint = pos_prev;
+
+
 	// Initialize the Landing locations and parameters
 
 	// calculate where to land based on the current velocity and acceleration constraints
 	// set this as the target location for position smoothing
 	_updateTrajConstraints();
 
+	_CalculateBrakingLocation();
+	_initial_land_position = _land_position;
 
-	PX4_INFO("FlightTaskMyTask activate was called! ret: %d", ret); // report if activation was successful
 	return ret;
+}
+
+void
+FlightTaskLand::reActivate()
+{
+	FlightTask::reActivate();
+	PX4_ERR("FlightTaskLand reActivate was called!");
+	// On ground, reset acceleration and velocity to zero
+	_position_smoothing.reset({0.f, 0.f, 0.f}, {0.f, 0.f, 0.7f}, _position);
 }
 
 bool
 FlightTaskLand::update()
 {
+	bool ret = FlightTask::update();
 
-	// Check if we have a velocity
-	_landing = _velocity.xy().norm() > 0.1f
-		   || _velocity(2) < _param_mpc_z_v_auto_dn.get(); // not sure about the last parts, check!
-
-	if (!_landing) { // smaller velocity as positive altitude is negative distance
-		PX4_WARN("Landing: Vehicle is moving, slow down first");
-
-
-	} else {
-		CalculateLandingLocation();
-		PositionSmoothing::PositionSmoothingSetpoints smoothed_setpoints;
-		_position_smoothing.generateSetpoints(
-			_position,
-			_initial_land_position,
-		{0, 0, 0}, _deltatime,
-		false,
-		smoothed_setpoints
-		);
-
+	if (!_is_initialized) {
+		PX4_ERR("initializing _position_smoothing");
+		PX4_ERR("_velocity_setpoint: %f, %f, %f", (double)_velocity_setpoint(0), (double)_velocity_setpoint(1),
+			(double)_velocity_setpoint(2));
+		PX4_ERR("_position_setpoint: %f, %f, %f", (double)_position_setpoint(0), (double)_position_setpoint(1),
+			(double)_position_setpoint(2));
+		PX4_ERR("_acceleration_setpoint: %f, %f, %f", (double)_acceleration_setpoint(0), (double)_acceleration_setpoint(1),
+			(double)_acceleration_setpoint(2));
+		_position_smoothing.reset(_acceleration_setpoint, _velocity, _position);
+		_is_initialized = true;
 	}
 
-	// update the yaw setpoint
+	PX4_WARN("_position: 		%f, 	%f, 	%f", (double)_position(0), (double)_position(1), (double)_position(2));
+	PX4_WARN("_land_position: 		%f, 	%f, 	%f", (double)_land_position(0), (double)_land_position(1),
+		 (double)_land_position(2));
 
-	PX4_INFO("FlightTaskMyTask update was called!"); // report update
-	return true;
+	if (_landing) {
+		_PerformLanding();
+
+	} else {
+		_CalculateBrakingLocation();
+		_SmoothBrakingPath();
+	}
+
+	return ret;
 }
 
 void
-FlightTaskLand::CalculateLandingLocation()
+FlightTaskLand::_PerformLanding()
+{
+	PX4_ERR("Landing: Vehicle is moving, perform landing");
+	// Perform 3 phase landing
+	_velocity_setpoint.setNaN();
+
+	// Calculate the vertical speed based on the distance to the ground
+	float vertical_speed = math::interpolate(_dist_to_ground,
+			       _param_mpc_land_alt2.get(), _param_mpc_land_alt1.get(),
+			       _param_mpc_land_speed.get(), _param_mpc_z_vel_max_dn.get());
+
+	bool range_dist_available = PX4_ISFINITE(_dist_to_bottom);
+
+	// If we are below the third phase altitude, use the crawl speed
+	if (range_dist_available && _dist_to_bottom <= _param_mpc_land_alt3.get()) {
+		vertical_speed = _param_mpc_land_crawl_speed.get();
+	}
+
+	_position_setpoint = {_land_position(0), _land_position(1), NAN}; // The last element of the land position has to stay NAN
+	_yaw_setpoint = _land_heading;
+	_velocity_setpoint(2) = vertical_speed;
+	_gear.landing_gear = landing_gear_s::GEAR_DOWN;
+
+}
+void
+FlightTaskLand::_SmoothBrakingPath()
+{
+	PositionSmoothing::PositionSmoothingSetpoints out_setpoints;
+	_position_smoothing.generateSetpoints(
+		_position,
+		_land_position,
+	{0.f, 0.f, 0.f},
+	_deltatime,
+	false,
+	out_setpoints
+	);
+
+	_jerk_setpoint = out_setpoints.jerk;
+	_acceleration_setpoint = out_setpoints.acceleration;
+	_velocity_setpoint = out_setpoints.velocity;
+	_position_setpoint = out_setpoints.position;
+	_yaw_setpoint = _land_heading;
+	PX4_WARN("_position_setpoint: 	%f, 	%f, 	%f", (double)_position_setpoint(0), (double)_position_setpoint(1),
+		 (double)_position_setpoint(2));
+
+	if (_velocity.xy().norm() <
+	    _param_nav_mc_alt_rad.get()) { //} || _velocity(2) < _param_mpc_z_v_auto_dn.get()){ // not sure about the last parts, check!)
+		_landing = true;
+		PX4_WARN("Landing: Vehicle is not moving, perform landing");
+	}
+
+}
+
+void
+FlightTaskLand::_CalculateBrakingLocation()
 {
 	// Calculate the 3D point where we until where we can slow down smoothly and then land based on the current velocities and system constraints on jerk and acceleration.
 
-	float delay_scale = 0.2f; // delay scale factor
-	const float braking_dist_xy = math::trajectory::computeBrakingDistanceFromVelocity(_velocity.xy().norm(),
+	float delay_scale = 0.6f; // delay scale factor
+	const float velocity_hor_abs = sqrtf(_velocity(0) * _velocity(0) + _velocity(1) * _velocity(1));
+	const float braking_dist_xy = math::trajectory::computeBrakingDistanceFromVelocity(velocity_hor_abs,
 				      _param_mpc_jerk_auto.get(), _param_mpc_acc_hor.get(), delay_scale * _param_mpc_jerk_auto.get());
+	PX4_WARN("Braking distance: %f", (double)braking_dist_xy);
 	float braking_dist_z = 0.0f;
 
-	if (_velocity(2) < 0.0f) {
-		PX4_WARN("Moving upwards");
+	if (_velocity(2) < -0.1f) {
+		PX4_WARN("Moving upwards: %f", (double)_velocity(2));
 		braking_dist_z = math::trajectory::computeBrakingDistanceFromVelocity(_velocity(2),
 				 _param_mpc_jerk_auto.get(), _param_mpc_acc_down_max.get(), delay_scale * _param_mpc_jerk_auto.get());
 
-	} else {
+	} else if (_velocity(2) > 0.1f) {
 		PX4_WARN("Moving downwards");
 		braking_dist_z = math::trajectory::computeBrakingDistanceFromVelocity(_velocity(2),
 				 _param_mpc_jerk_auto.get(), _param_mpc_acc_up_max.get(), delay_scale * _param_mpc_jerk_auto.get());
@@ -127,9 +199,10 @@ FlightTaskLand::CalculateLandingLocation()
 
 	const Vector3f braking_dir = _velocity.unit_or_zero();
 	const Vector3f braking_dist = {braking_dist_xy, braking_dist_xy, braking_dist_z};
-
-	_initial_land_position = _position + braking_dir * braking_dist;
-	PX4_INFO("FlightTaskMyTask CalculateLandingLocation was called!"); // report calculation
+	Vector3f Temp = braking_dir.emult(braking_dist);
+	PX4_WARN("Braking distance: %f, %f, %f", (double)Temp(0), (double)Temp(1), (double)Temp(2));
+	_land_position = _position + braking_dir.emult(braking_dist);
+	PX4_INFO("FlightTaskMyTask CalculateBrakingLocation was called!"); // report calculation
 }
 
 void
@@ -148,19 +221,21 @@ FlightTaskLand::_updateTrajConstraints()
 	_position_smoothing.setMaxJerk(_param_mpc_jerk_auto.get());
 
 	// set the constraints for the vertical direction
+	_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_down_max.get());
+	_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_dn.get());
 	// if moving up, acceleration constraint is always in deceleration direction, eg opposite to the velocity
-	if (_velocity(2) < 0.0f && !_landing) {
-		_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_down_max.get());
-		_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_up.get());
+	// if (_velocity(2) < 0.0f && !_landing) {
+	// 	_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_down_max.get());
+	// 	_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_up.get());
 
-	} else if (!_landing) {
-		_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_up_max.get());
-		_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_dn.get());
+	// } else if (!_landing) {
+	// 	_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_up_max.get());
+	// 	_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_dn.get());
 
-	} else {
-		_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_down_max.get());
-		_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_dn.get());
-	}
+	// } else {
+	// 	_position_smoothing.setMaxAccelerationZ(_param_mpc_acc_down_max.get());
+	// 	_position_smoothing.setMaxVelocityZ(_param_mpc_z_v_auto_dn.get());
+	// }
 
 	// should the constraints be different when switching from an auto mode compared to an manual mode?
 }
