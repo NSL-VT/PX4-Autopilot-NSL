@@ -236,6 +236,19 @@ PARAM_DEFINE_INT32(UAVCAN_PUB_MBD, 0);
 PARAM_DEFINE_INT32(UAVCAN_SUB_ASPD, 0);
 
 /**
+ * subscription adu
+ *
+ * Enable UAVCAN air data unit subscriptions.
+ *  uavcan::equipment::air_data::AngleOfAttack
+ *  uavcan::equipment::air_data::SideSlip
+ *
+ * @boolean
+ * @reboot_required true
+ * @group UAVCAN
+ */
+PARAM_DEFINE_INT32(UAVCAN_SUB_ADU, 1);
+
+/**
  * subscription barometer
  *
  * Enable UAVCAN barometer subscription.

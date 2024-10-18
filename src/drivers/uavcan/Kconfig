@@ -38,6 +38,10 @@ if DRIVERS_UAVCAN
         bool "Subscribe to Airspeed:                    uavcan::equipment::air_data::IndicatedAirspeed | uavcan::equipment::air_data::TrueAirspeed | uavcan::equipment::air_data::StaticTemperature"
         default y
 
+    config UAVCAN_SENSOR_ADU
+        bool "Subscribe to Air Data Unit:               uavcan::equipment::air_data::AngleOfAttack | uavcan::equipment::air_data::Sideslip"
+        default y
+
     config UAVCAN_SENSOR_BARO
         bool "Subscribe to Barometer:                   uavcan::equipment::air_data::StaticPressure | uavcan::equipment::air_data::StaticTemperature"
         default y
