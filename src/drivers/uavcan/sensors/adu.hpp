@@ -44,6 +44,10 @@
 #include <uavcan/equipment/air_data/AngleOfAttack.hpp>
 #include <uavcan/equipment/air_data/Sideslip.hpp>
 
+#include <cmath>
+
+/* Define constants for the maximum number of ADUs */
+constexpr int MAX_ADUS = 16;
 
 class UavcanAduBridge : public UavcanSensorBridgeBase
 {
@@ -74,7 +78,6 @@ private:
 
 	uavcan::Subscriber<uavcan::equipment::air_data::AngleOfAttack, AOACbBinder> _sub_aoa_data; //What does this subscriber do? Explain the entore process.
 	uavcan::Subscriber<uavcan::equipment::air_data::Sideslip, SSCbBinder> _sub_ss_data;
-	float _last_ss_val{NAN};
-	float _last_ss_variance_val{NAN};
+	float _ss_vals[MAX_ADUS];
 
 };

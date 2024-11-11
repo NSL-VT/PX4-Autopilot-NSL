@@ -47,7 +47,9 @@ UavcanAduBridge::UavcanAduBridge(uavcan::INode &node) :
 	UavcanSensorBridgeBase("uavcan_adu", ORB_ID(sensor_flow_angle)),
 	_sub_aoa_data(node),
 	_sub_ss_data(node)
-	{}
+{
+	for (int i = 0; i < MAX_ADUS; i++) _ss_vals[i] = NAN;
+}
 
 int UavcanAduBridge::init()
 {
@@ -68,32 +70,25 @@ int UavcanAduBridge::init()
 }
 
 
-void
-UavcanAduBridge::ss_sub_cb(const
-				 uavcan::ReceivedDataStructure<uavcan::equipment::air_data::Sideslip> &msg)
+void UavcanAduBridge::ss_sub_cb(const
+	uavcan::ReceivedDataStructure<uavcan::equipment::air_data::Sideslip> &msg)
 {
-	_last_ss_val = msg.sideslip_angle;
-	_last_ss_variance_val = msg.sideslip_angle_variance;
-
+	/* Store sideslip angle using the node ID as the key */
+	uint8_t node_id = msg.getSrcNodeID().get();
+	_ss_vals[node_id-1] = msg.sideslip_angle;
 }
 
-void
-UavcanAduBridge::aoa_sub_cb(const
-				 uavcan::ReceivedDataStructure<uavcan::equipment::air_data::AngleOfAttack> &msg)
+void UavcanAduBridge::aoa_sub_cb(const
+	uavcan::ReceivedDataStructure<uavcan::equipment::air_data::AngleOfAttack> &msg)
 {
+	uint8_t node_id = msg.getSrcNodeID().get();
+
 	sensor_flow_angle_s report{};
 
-	/*
-	 * FIXME HACK
-	 * This code used to rely on msg.getMonotonicTimestamp().toUSec() instead of HRT.
-	 * It stopped working when the time sync feature has been introduced, because it caused libuavcan
-	 * to use an independent time source (based on hardware TIM5) instead of HRT.
-	 * The proper solution is to be developed.
-	 */
 	report.timestamp = hrt_absolute_time();
-	report.node_id = msg.getSrcNodeID().get();
-	report.beta_vane = _last_ss_val;
+	report.node_id = node_id;
+	report.beta_vane = _ss_vals[node_id-1];
 	report.alpha_angle = msg.aoa;
 
-	publish(msg.getSrcNodeID().get(), &report);
+	publish(node_id, &report);
 }
