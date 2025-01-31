@@ -33,6 +33,7 @@
 
 /**
  * @author Binay Rijal <binaypr@vt.edu>
+ * @author Jeremy Hopwood <jeremyhopwood@vt.edu>
  * modified from "airspeed.cpp"
 */
 
@@ -88,7 +89,7 @@ void UavcanAduBridge::aoa_sub_cb(const
 	report.timestamp = hrt_absolute_time();
 	report.node_id = node_id;
 	report.beta_vane = _ss_vals[node_id-1];
-	report.alpha_angle = msg.aoa;
+	report.alpha_vane = msg.aoa;
 
 	publish(node_id, &report);
 }

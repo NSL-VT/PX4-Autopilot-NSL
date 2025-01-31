@@ -33,6 +33,7 @@
 
 /**
  * @author Binay Rijal <binaypr@vt.edu>
+ * @author Jeremy Hopwood <jeremyhopwood@vt.edu>
  * modified from "airspeed.hpp"
  */
 
