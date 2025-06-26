@@ -30,6 +30,10 @@ if DRIVERS_UAVCAN
         bool "Include rgb controller"
         default y
 
+    config UAVCAN_SENSOR_ADU
+        bool "Subscribe to Air Data Unit:               uavcan::equipment::air_data::AngleOfAttack | uavcan::equipment::air_data::Sideslip"
+        default y
+
     config UAVCAN_SENSOR_ACCEL
         bool "Subscribe to IMU:                         uavcan::equipment::ahrs::RawIMU"
         default y

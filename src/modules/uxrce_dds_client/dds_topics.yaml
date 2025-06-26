@@ -11,6 +11,9 @@ publications:
   - topic: /fmu/out/register_ext_component_reply
     type: px4_msgs::msg::RegisterExtComponentReply
 
+  - topic: /fmu/out/sensor_flow_angle
+    type: px4_msgs::msg::SensorFlowAngle
+
   - topic: /fmu/out/airspeed_validated
     type: px4_msgs::msg::AirspeedValidated
 

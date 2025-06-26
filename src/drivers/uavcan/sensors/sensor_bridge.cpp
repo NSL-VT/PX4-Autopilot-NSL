@@ -42,6 +42,9 @@
 #include "accel.hpp"
 #include "gyro.hpp"
 #endif
+#if defined(CONFIG_UAVCAN_SENSOR_ADU)
+#include "adu.hpp"
+#endif
 #if defined(CONFIG_UAVCAN_SENSOR_AIRSPEED)
 #include "airspeed.hpp"
 #endif
@@ -84,6 +87,16 @@
  */
 void IUavcanSensorBridge::make_all(uavcan::INode &node, List<IUavcanSensorBridge *> &list)
 {
+	// adu
+#if defined(CONFIG_UAVCAN_SENSOR_ADU)
+	int32_t uavcan_sub_adu = 1;
+	param_get(param_find("UAVCAN_SUB_ADU"), &uavcan_sub_adu);
+
+	if (uavcan_sub_adu != 0) {
+		list.add(new UavcanAduBridge(node));
+	}
+#endif
+
 	// airspeed
 #if defined(CONFIG_UAVCAN_SENSOR_AIRSPEED)
 	int32_t uavcan_sub_aspd = 1;
